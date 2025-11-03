@@ -133,4 +133,31 @@ class UWorld final : public UObject, public FNetworkNotify
 
         return NewWorld;
     }
+
+    // 9 - Foundation - CreateWorld - UWorld's member variables
+
+    /** 
+     * 이 월드를 로드할 때 사용되었던 URL
+     * kwakkh
+     * - URL을 패키지 경로(package path)라고 생각
+     * - e.g. Game\Map\Seoul\Seoul.umap
+     */
+	FURL URL;
+
+    /**
+     * 이 월드의 유형(Type). 월드가 어떤 상황(Context)에서 사용되고 있는지를 설명 (Editor, Game, Preview etc.)
+     * kwakkh
+     * - TEnumAsByte는 열거형에 대한 bit 연산을 지원하기 위한 헬퍼 래퍼(Helper Wrapper) 클래스 (이 클래스를 한 번 살펴보는 걸 추천)
+     * - 조언 : Bit 연산을 다루는 능력을 키우자.
+     */
+	TEnumAsByte<EWorldType::Type> WorldType;
+
+    /**
+	 * 이 컬렉션(UWorld)과 연관된 영구 레벨(Persistent Level)이다.
+	 * 소스 컬렉션(원본 월드)과 복제된 컬렉션(복제된 월드)은 각각 자신만의 인스턴스를 가지게 된다.
+     * kwakkh
+     * - 월드 정보에 대한 간략한 설명
+	 */
+	UPROPERTY()
+	TObjectPtr<class ULevel> PersistentLevel;
 };
