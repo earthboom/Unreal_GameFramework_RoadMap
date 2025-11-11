@@ -39,7 +39,7 @@
  */
 
 // 12 - Foundation - CreateWorld - AActor
-// haker: 
+// kwakkh: 
 // - Actor:
 //   - AActor == collection of ActorComponents (-> Entity-Component structure)
 //   - ActorComponent's examples:
@@ -241,4 +241,134 @@ public:
 
         FActorThreadContext::Get().TestRegisterTickFunctions = this; // we will verify the super call chain is intact. Don't copy and paste this to another actor class!
     }
+
+    /** Returns whether an actor has been initialized for gameplay */
+	bool IsActorInitialized() const { return bActorInitialized; }
+
+    // 13 - Foundation - CreateWorld - AActor's member variables
+
+    /**
+	 * Primary Actor tick function, which calls TickActor().
+	 * Tick functions can be configured to control whether ticking is enabled, at what time during a frame the update occurs, and to set up tick dependencies.
+	 * @see https://docs.unrealengine.com/API/Runtime/Engine/Engine/FTickFunction
+	 * @see AddTickPrerequisiteActor(), AddTickPrerequisiteComponent()
+	 */
+    // 43 - Foundation - CreateWorld - AActor::PrimaryActorTick
+    // see FActorTickFunction (goto 44)
+	UPROPERTY(EditDefaultsOnly, Category=Tick)
+	struct FActorTickFunction PrimaryActorTick;
+
+    /**
+	 * 이 액터가 소유하는 모든 액터 컴포넌트들입니다. 액터가 많은 수의 컴포넌트를 가질 수 있으므로, Set(집합) 형태로 저장됩니다.
+	 * @see GetComponents()
+	 */
+	TSet<TObjectPtr<UActorComponent>> OwnedComponents;
+
+    /** 
+	 *	Indicates that PreInitializeComponents/PostInitializeComponents have been called on this Actor 
+	 *	Prevents re-initializing of actors spawned during level startup
+	 */
+    // kwakkh : PostInitializeComponents가 호출될 때, bActorInitialized는 '참(true)'으로 설정.
+    // uint8 -> 1byte -> 8bit 인데, " : 1 "의 의미는 그 중에서 1bit만 쓰겠다는 것. (밑의 멤버 변수를 포함해서 uint 하나만 쓰는 상황)
+	uint8 bActorInitialized : 1;
+
+    /** Whether we've tried to register tick functions. Reset when they are unregistered. */
+    // kwakkh : 틱 함수(tick function) 등록
+	uint8 bTickFunctionsRegistered : 1;
+
+    /** Enum defining if BeginPlay has started or finished */
+	enum class EActorBeginPlayState : uint8
+	{
+		HasNotBegunPlay,
+		BeginningPlay,
+		HasBegunPlay,
+	};
+
+    /** 
+	 *	Indicates that BeginPlay has been called for this Actor.
+	 *  Set back to HasNotBegunPlay once EndPlay has been called.
+     * 
+     * kwakkh
+     * - uint8 타입의 열거형 중간에 있는 비트에도 비트 할당이 정상적으로 작동
+     * - BeginPlay() 또는 EndPlay() 호출을 통해 ActorHasBegunPlay 상태가 업데이트된다.
+	 */
+	EActorBeginPlayState ActorHasBegunPlay : 2;
+
+
+    /** 이것은 월드 내에서 이 액터의 트랜스폼(위치, 회전, 스케일)을 정의하는 컴포넌트이며, 
+     * 다른 모든 컴포넌트들은 어떤 식으로든 이 컴포넌트에 부착(Attached)되어야 한다. 
+     * 
+     * kwakkh
+     * AActor manages its components(UActorComponent) in a form of scene graph using USceneComponent: 
+     * [ ] see BP's viewport (refer to SCS[Simple Construction Script])
+     * 
+     * Diagram:                                                                                         
+     * AActor                                                                                
+     * │                                                                                    
+     * ├──OwnedComponents: TSet<TObjectPtr<UActorComponent>                                 
+     * │    ┌──────────────────────────────────────────────────────────────────────────┐    
+     * │    │ [Component0, Component1, Component2, Component3, Component4, Component5] │    
+     * │    │                                                                          │    
+     * │    └──────────────────────────────────────────────────────Linear Format───────┘    
+     * └──RootComponent: TObjectPtr<USceneComponent>                                        
+     *      ┌────────────────────────────┐                                                  
+     *      │ Component0 [RootComponent] │                                                  
+     *      │  │                         │                                                  
+     *      │  ├──Component1             │                                                  
+     *      │  │   │                     │                                                  
+     *      │  │   ├──Component2         │                                                  
+     *      │  │   │                     │                                                  
+     *      │  │   └──Component3         │                                                  
+     *      │  │       │                 │                                                  
+     *      │  │       └──Component4     │                                                  
+     *      │  │                         │                                                  
+     *      │  └──Component5             │                                                  
+     *      │                            │                                                  
+     *      └────Hierachrical Format─────┘                                                   
+     */
+	UPROPERTY(BlueprintGetter=K2_GetRootComponent, Category="Transformation")
+	TObjectPtr<USceneComponent> RootComponent;
+
+
+
+    /** The UChildActorComponent that owns this Actor. 
+     * 
+     * kwakkh
+     * - UChildActorComponent는 액터와 액터 간의 연결을 지원
+     * 
+     * - see Diagram:                                                                                               
+     *   ┌──────────┐                         ┌──────────┐                           ┌──────────┐              
+     *   │  Actor0  ├────────────────────────►│  Actor1  ├──────────────────────────►│  Actor2  │              
+     *   └──────────┘                         └──────────┘                           └──────────┘              
+     *                                                                                                         
+     *   RootComponent                        RootComponent ◄──────────┐             RootComponent             
+     *    │                                    │                       │              │                        
+     *    ├───Component1◄──────────┐           ├───Component1     Actor2-Actor1       └───Component1           
+     *    │                        │           │                       │                                       
+     *    ├───Component2    Actor1-Actor0      └───Component2          └─────────────ParentComponent           
+     *    │    │                   │                                                                           
+     *    │    └───Component3      └──────────ParentComponent                                                  
+     *    │                                                                                                    
+     *    └───Component4                                                                                       
+     *                                                                                                         
+     *                                                                                                         
+     *               ┌──────────────────────────────────────┐                                                  
+     *               │                                      │                                                  
+     *               │      Actor0 ◄───                     │                                                  
+     *               │       │                              │                                                  
+     *               │       └─RootComponent                │                                                  
+     *               │          │                           │                                                  
+     *               │          └─Component1                │                                                  
+     *               │             │                        │                                                  
+     *               │             └─Actor1 ◄───            │                                                  
+     *               │                │                     │                                                  
+     *               │                └─RootComponent       │                                                  
+     *               │                   │                  │                                                  
+     *               │                   └─Actor2 ◄────     │                                                  
+     *               │                                      │                                                  
+     *               │                                      │                                                  
+     *               └──────────────────────────────────────┘
+     */
+	UPROPERTY()
+	TWeakObjectPtr<UChildActorComponent> ParentComponent;
 };
