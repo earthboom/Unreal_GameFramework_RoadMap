@@ -24,6 +24,158 @@ struct FWorldInitializationValues
     //...
 };
 
+/** Subsystems은 특정 엔진 구조체의 생명 주기(lifetime)를 공유하는 자동 인스턴스화(auto instanced) 클래스
+ * 
+ *	현재 지원되는 서브시스템 생명 주기:
+ *		Engine		 -> UEngineSubsystem 상속
+ *		Editor		 -> UEditorSubsystem 상속
+ *		GameInstance -> UGameInstanceSubsystem 상속
+ *		World		 -> UWorldSubsystem 상속
+ *		LocalPlayer	 -> ULocalPlayerSubsystem 상속
+ *
+ *
+ * 일반적인 접근 예시
+ * 1. 단일 구현 클래스 접근 예시:
+ * 		class UMySystem : public UGameInstanceSubsystem
+ *	    접근 방법:
+ *		UGameInstance* GameInstance = ...;
+ *		UMySystem* MySystem = GameInstance->GetSubsystem<UMySystem>();
+ *
+ * 2. Null 체크를 포함한 접근 예시:
+ *      GameInstance가 Null(널)일 가능성으로부터 보호해야 하는 경우 :
+ *		UGameInstance* GameInstance = ...;
+ *		UMyGameSubsystem* MySubsystem = UGameInstance::GetSubsystem<MyGameSubsystem>(GameInstance);
+ *
+ * 인터페이스 기반 접근 예시
+ * - 여러 구현체를 가질 수 있는 Interface를 정의할 수도 있다.
+ * 
+ * 인터페이스 예시:
+ *  인터페이스: 
+ *      MySystemInterface
+ *  두 개의 구체적인 파생 클래스:
+ *      MyA : public MySystemInterface
+ *      MyB : public MySystemInterface
+ *
+ *	접근 방법:
+ *		UGameInstance* GameInstance = ...;
+ *		const TArray<UMyGameSubsystem*>& MySubsystems = GameInstance->GetSubsystemArray<MyGameSubsystem>();
+ * 
+ * 21 - Foundation - CreateWorld - USubsystem
+ * kwakkh : Subsystem.h 에 존재
+ * - USubsystem은 언리얼 엔진의 컴포넌트(component) 하나의 생명 주기(생성/파괴)를 따르는 시스템.
+ * - types of subsystems:
+ *   1. Engine        -> UEngineSubsystem 상속
+ *   2. Editor        -> UEditorSubsystem 상속
+ *   3. GameInstance  -> UGameInstanceSubsystem 상속
+ *   4. World         -> UWorldSubsystem 상속
+ *   5. LocalPlayer   -> ULocalPlayerSubsystem 상속
+ * 
+ * - 엔진의 UWorld와 같은 컴포넌트들의 생명 주기를 수동으로 관리하는 것은 번거롭다.
+ *   - 만약 Subsystem을 사용한다면, 이 모든 것이 매우 쉽고 편리해질 것!
+ */
+UCLASS(Abstract, MinimalAPI)
+class USubsystem : public UObject
+{
+	GENERATED_BODY()
+
+    /** Override to control if the Subsystem should be created at all.
+	 * For example you could only have your system created on servers.
+	 * It's important to note that if using this is becomes very important to null check whenever getting the Subsystem.
+	 *
+	 * Note: This function is called on the CDO prior to instances being created!
+	 */
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const { return true; }
+
+	/** Implement this for initialization of instances of the system */
+	virtual void Initialize(FSubsystemCollectionBase& Collection) {}
+
+	/** Implement this for deinitialization of instances of the system */
+	virtual void Deinitialize() {}
+
+private:
+    // haker: we are interested UWorld's [FObjectSubsystemCollection<UWorldSubsystem>]
+    // - each subsystem has its owner like this
+    // see FObjectSubsystemCollection (goto 22)
+    FSubsystemCollectionBase* InternalOwningSubsystem;
+}
+
+/**
+ * UWorldSubsystem
+ * UWorld와 생명 주기를 공유하며 자동으로 인스턴스화(instanced)되고 초기화되는 시스템들의 기본 클래스
+ * 21 - Foundation - CreateWorld - UWorldSubsystem
+ * WorldSubsystem.h 에 존재
+ * see USubsystem (goto 21)
+ */
+UCLASS(Abstract, MinimalAPI)
+class UWorldSubsystem : public USubsystem
+{
+	GENERATED_BODY()
+
+    /** 월드 컴포넌트들(예: 라인 배치기 및 모든 레벨 컴포넌트들)의 업데이트가 완료된 후에 호출된다. */
+	virtual void OnWorldComponentsUpdated(UWorld& World) {}
+}
+
+/** 
+ * Indicates the type of a level collection, used in FLevelCollection.
+ * 20 - Foundation - CreateWorld - ELevelCollectionType
+ * kwakkh : 해당 타입(Type)들에 얽매이지 않고, 동적인 레벨(Dynamic Level)과 정적인 레벨(Static Level)처럼 단순하게 이해하는게 좋다.
+ * EngineTypes.h 에 존재
+ */
+enum class ELevelCollectionType : uint8
+{
+	/**
+	 * 이것은 일반적인 게임플레이에 사용되며, 복제된 모든 컬렉션의 원본이 되는 동적 레벨들이다.
+	 * 이 컬렉션은 월드의 영구 레벨(Persistent Level)과, 동적 또는 복제되는 게임플레이 액터를 포함하는 모든 스트리밍 레벨들을 담게 된다.
+	 * 이 컬렉션은 게임플레이 월드와 에디터 월드 모두에서 항상 존재한다.
+	 */
+	DynamicSourceLevels,
+
+	/** 
+	 * 게임의 요청이 있을 경우 DynamicSourceLevels로부터 복제된, 게임플레이와 관련된 레벨들이다.
+	 * 이 컬렉션은 레벨들이 실제로 복제된 경우에만 존재한다.
+	 */
+	DynamicDuplicatedLevels,
+
+	/**
+	 * 이 레벨들은 원본 레벨들과 복제된 레벨들 사이에서 공유된다.
+	 * 이 레벨들은 정적인 지오메트리와 복제되거나 게임플레이의 영향을 받지 않는 기타 시각 요소들만 포함해야 한다.
+	 * 메모리를 절약하기 위해 이 레벨들은 복제되지 않을 것이다.
+	 * 만약 s.World.CreateStaticLevelCollection 값이 0이라면, 이 컬렉션은 생성되지 않으며 정적 레벨들은 동적 레벨로 취급된다.
+	 */
+	StaticLevels,
+
+	MAX
+};
+
+/**
+ * UWorld 내에서 특정 ELevelCollectionType 유형의 레벨 그룹을 포함하며, 이 레벨들을 적절히 틱(tick)하고 업데이트하는 데 필요한 컨텍스트(Context)를 담고 있다. 
+ * 이 객체는 이동만 가능(move-only).
+ * 
+ * 19 - Foundation - CreateWorld - FLevelCollection
+ * kwakkh : FLevelCollection은 ELevelCollectionType을 기반으로 하는 컬렉션(Collection)이다.
+ */
+USTRUCT()
+struct FLevelCollection
+{
+    /** The type of this collection. */
+    // see ELevelCollectionType (goto 20)
+	ELevelCollectionType CollectionType;
+
+    //...
+
+    /**
+	 * The persistent level associated with this collection.
+	 * The source collection and the duplicated collection will have their own instances.
+     * kwakkh : usually OwnerWorld's PersistentLevel
+	 */
+	UPROPERTY()
+	TObjectPtr<class ULevel> PersistentLevel;
+
+	/** All the levels in this collection. */
+	UPROPERTY()
+	TSet<TObjectPtr<ULevel>> Levels;
+}
+
 /** 
  * **월드(World)**는 액터(Actor)와 컴포넌트(Component)들이 존재하며 렌더링되는 맵 또는 샌드박스(Sandbox)를 나타내는 최상위 객체
  * 
@@ -160,4 +312,65 @@ class UWorld final : public UObject, public FNetworkNotify
 	 */
 	UPROPERTY()
 	TObjectPtr<class ULevel> PersistentLevel;
+
+#if WITH_EDITORONLY_DATA
+	/** 현재 편집 중인 레벨을 가리키는 포인터. 이 레벨은 Levels 배열에 포함되어야 하며, 게임에서는 영구 레벨(PersistentLevel)과 동일해야 한다. */
+	UPROPERTY(Transient)
+	TObjectPtr<class ULevel> CurrentLevel;
+#endif
+
+    /** 현재 이 월드에 포함된 레벨들의 배열. Hard References(강한 참조)를 피하기 위해 디스크에 직렬화되지 않는다. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<class ULevel>> Levels;
+
+	/** 현재 이 월드에 포함된 레벨 컬렉션들의 배열 */
+	UPROPERTY(Transient, NonTransactional, Setter = None, Getter = None)
+	TArray<FLevelCollection> LevelCollections;
+
+    /** DefaultPhysicsVolume used for whole game **/
+	UPROPERTY(Transient)
+	TObjectPtr<APhysicsVolume> DefaultPhysicsVolume;
+
+    /** 전체 게임에 사용되는 기본 물리 볼륨(DefaultPhysicsVolume)
+     * - 특정 범위만 정하고 싶음
+     */
+	FPhysScene*	PhysicsScene;
+
+    // PSC Pooling END
+    // see UWorldSubsystem (goto 21)
+	FObjectSubsystemCollection<UWorldSubsystem> SubsystemCollection;
+
+    /** line batchers: */
+    // kwakkh: debug lines
+    // - ULineBatchComponents are resided in UWorld's subobjects
+    TObjectPtr<class ULineBatchComponent> LineBatcher;
+    TObjectPtr<class ULineBatchComponent> PersistentLineBatcher;
+    TObjectPtr<class ULineBatchComponent> ForegroundLineBatcher;
+
+    /**
+     * kwakkh : let's wrap up what we have looked through classes:
+     *                                                                                ┌───WorldSubsystem0       
+     *                                                        ┌────────────────────┐  │                         
+     *                                                 World──┤SubsystemCollections├──┼───WorldSubsystem1       
+     *                                                   │    └────────────────────┘  │                         
+     *                                                   │                            └───WorldSubsystem2       
+     *             ┌─────────────────────────────────────┴────┐                                                 
+     *             │                                          │                                                 
+     *           Level0                                     Level1                                              
+     *             │                                          │                                                 
+     *         ┌───┴────┐                                 ┌───┴────┐                                            
+     *         │ Actor0 ├────Component0(RootComponent)    │ Actor0 ├─────Component0(RootComponent)              
+     *         ├────────┤     │                           ├────────┤      │                                     
+     *         │ Actor1 │     ├─Component1                │ Actor1 │      │   ┌──────┐                          
+     *         ├────────┤     │                           ├────────┤      └───┤Actor2├──RootComponent           
+     *         │ Actor2 │     └─Component2                │ Actor2 │          └──────┘   │                      
+     *         ├────────┤                                 ├────────┤                     ├──Component0          
+     *         │ Actor3 │                                 │ Actor3 │                     │                      
+     *         └────────┘                                 └────────┘                     ├──Component1          
+     *                                                                                   │   │                  
+     *                                                                                   │   └──Component2      
+     *                                                                                   │                      
+     *                                                                                   └──Component3          
+     * search 'goto 4'
+     */
 };

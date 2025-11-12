@@ -124,6 +124,66 @@ public:
      */
 	TArray<TObjectPtr<AActor>> Actors;
 
-    /** Cached level collection that this level is contained in, for faster access than looping through the collections in the world. */
+    /** 이 레벨이 포함된 레벨 컬렉션을 캐시(Cached)한 것입니다. 이는 월드 내의 모든 컬렉션들을 순회(Looping)하는 것보다 더 빠른 접근을 위함이다. */
+     // see FLevelCollection (goto 19)
 	FLevelCollection* CachedLevelCollection;
+
+    /** 
+	 * 이 레벨을 자신의 Levels 배열에 담고 있는 월드(UWorld)이다.
+	 * 이 값은 GetOuter()와 동일하지 않다. 스트리밍 레벨의 GetOuter()는 사용되지 않는 잔재(vestigial) 월드이기 때문이다.
+	 * 다른 모든 UObject 참조와 마찬가지로, BeginDestroy() 호출 중에는 접근해서는 안 된다. GC(가비지 컬렉터)가 어떤 순서로든 발생할 수 있기 때문이다.
+     * 
+     *  kwakkh : OwningWorld vs. OuterPrivate
+     *  - 주의. 이 설명은 월드 컴포지션(World Composition) 방식의 레벨 스트리밍 또는 레벨 블루프린트에서의 레벨 로드/언로드 조작을 기반으로 한다.
+     *    - 월드 파티션(World Partition)은 개념이 다르며, 일반적으로 이 방식에서는 OwningWorld와 OuterPrivate가 동일합니다.
+     *  - Diagram:                                                                                                        
+     *       World0(OwningWorld)──[OuterPrivate]──►Package0(World.umap)                                          
+     *        ▲                                                                                                  
+     *        │                                                                                                  
+     *  [OuterPrivate]                                                                                           
+     *        │                                                                                                  
+     *        │                                                                                                  
+     *       Level0(PersistentLevel)                                                                             
+     *        │                                                                                                  
+     *        │                                                                                                  
+     *        ├────Level1──[OuterPrivate]──►World1───[OuterPrivate]───►Package1(Level1.umap)                     
+     *        │                                                                                                  
+     *        └────Level2───────►World2───────►Package2(Level2.umap)                                               
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<UWorld> OwningWorld;
+
+    enum class EIncrementalComponentState : uint8
+	{
+		Init,
+		PreRegisterInitialComponents,
+		RegisterInitialComponents,
+#if WITH_EDITOR
+		RunConstructionScripts,
+#endif
+		Finalize
+	};
+
+    /** 레벨 내에서 액터 컴포넌트들을 점진적으로(incrementally) 업데이트하는 현재 단계를 의미 */
+	EIncrementalComponentState	IncrementalComponentState;
+
+    /** CurrentActorIndexForUpdateComponents가 참조하는 액터가 PreRegisterAllComponents를 호출했는지 여부 */
+    UE_DEPRECATED(5.5, "This property shouldn't be used anymore.")
+	uint8 bHasCurrentActorCalledPreRegister:1;
+
+    /** 컴포넌트들이 현재 등록되었는지 여부 */
+	uint8 bAreComponentsCurrentlyRegistered:1;
+
+    /** 컴포넌트 업데이트를 위한 액터 배열의 현재 인덱스 
+     * kwakkh : ULevel의 ActorList에 있는 액터 인덱스를 추적하여 점진적 업데이트를 지원
+    */
+	int32 CurrentActorIndexForIncrementalUpdate;
+
+    /** 틱 함수들을 저장하기 위한 데이터 구조체 
+     * kwakkh
+     * - 액터가 틱을 도는데 있어서 종속적인 관계는 틱이 여기 포함되어서다
+    */
+	class FTickTaskLevel* TickTaskLevel;
+
+    // goto 9 (UWorld's member variables)
 };
